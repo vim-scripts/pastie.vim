@@ -2,7 +2,7 @@
 " Maintainer: Tim Pope <vimNOSPAM@tpope.info>
 " URL:        http://www.vim.org/scripts/script.php?script_id=1624
 " GetLatestVimScripts: 1624 1
-" $Id: pastie.vim,v 1.6 2006/12/15 07:39:24 tpope Exp $
+" $Id: pastie.vim,v 1.7 2006/12/22 23:58:47 tpope Exp $
 
 " Installation:
 " Place in ~/.vim/plugin or vimfiles/plugin
@@ -423,7 +423,7 @@ function! s:cookies()
     endif
     if !exists("g:pastie_account")
         let rubycmd = '%w(~/.mozilla/firefox ~/.firefox/default ~/.phoenix/default ~/Application\ Data/Mozilla/Firefox/Profiles ~/Library/Application\ Support/Firefox/Profiles)'
-        let rubycmd = rubycmd . '.each {|dir| Dir[File.join(File.expand_path(dir),%{*})].select {|p| File.exists?(File.join(p,%{cookies.txt}))}.each {|p| File.open(File.join(p,%{cookies.txt})).each_line { |l| a=l.split(9.chr); puts a[6] if a[0] =~ /pastie\.caboo\.se#{37.chr}/ && Time.now.to_i < a[4].to_i && a[5] == %{account} }}}'
+        let rubycmd = rubycmd . '.each {|dir| Dir[File.join(File.expand_path(dir),%{*})].select {|p| File.exists?(File.join(p,%{cookies.txt}))}.each {|p| File.open(File.join(p,%{cookies.txt})).each_line { |l| a=l.split(9.chr); puts a[6] if a[0] =~ /pastie\.caboo\.se#{36.chr}/ && Time.now.to_i < a[4].to_i && a[5] == %{account} }}}'
         let output = ''
         let output = system('ruby -e "'.rubycmd.'"')
         if output =~ '\n' && output !~ '-e:'
