@@ -2,7 +2,7 @@
 " Maintainer: Tim Pope <vimNOSPAM@tpope.info>
 " URL:        http://www.vim.org/scripts/script.php?script_id=1624
 " GetLatestVimScripts: 1624 1
-" $Id: pastie.vim,v 1.9 2007-07-02 14:21:13 tpope Exp $
+" $Id: pastie.vim,v 1.13 2007-10-01 15:23:31 tpope Exp $
 
 " Installation:
 " Place in ~/.vim/plugin or vimfiles/plugin
@@ -307,7 +307,6 @@ function! s:PastieRead(file)
     set nomodified
     let url = substitute(a:file,'\c/\%(download/\=\|text/\=\)\=$','','')
     let url = url."/download"
-    let g:reading = url
     let result = system('ruby -rnet/http -e "puts Net::HTTP.get_response(URI.parse(%{'.url.'}))[%{Content-Disposition}]"')
     let fn = matchstr(result,'filename="\zs.*\ze"')
     let type = s:parser(fn)
@@ -345,35 +344,47 @@ endfunction
 function! s:PastieWrite(file)
     let parser=s:parser(&ft)
     let tmp = tempname()
-    let num = matchstr(a:file,'/\zs\d\+\.\@!')
+    let num = matchstr(a:file,'/\@<!/\zs\d\+')
     if num == ''
         let num = 'pastes'
     endif
-    if exists("b:pastie_update") && s:cookies() != ''
-        let url = "/".num."/update"
+    if exists("b:pastie_update") && s:cookies() != '' && num != ""
+        let url = "/pastes/".num
+        let method = "_method=put&"
     else
-        let url = "/".num."/create"
+        let url = "/pastes"
+        let method = ""
+    endif
+    if exists("b:pastie_display_name")
+        let pdn = "&paste[display_name]=".s:urlencode(b:pastie_display_name)
+    elseif exists("g:pastie_display_name")
+        let pdn = "&paste[display_name]=".s:urlencode(g:pastie_display_name)
+    else
+        let pdn = ""
     endif
     silent exe "write ".tmp
     let result = ""
-    let rubycmd = 'print Net::HTTP.start(%{'.s:domain.'}){|h|h.post(%{'.url.'}, %q{paste[parser]='.parser.'&paste[authorization]=burger&paste[key]=&paste[body]=} + File.read(%q{'.tmp.'}).gsub(/^(.*?) *#\!\! *#{36.chr}/,%{!\!}+92.chr+%{1}).gsub(/[^a-zA-Z0-9_.-]/n) {|s| %{%%%02x} % s[0]},{%{Cookie} => %{'.s:cookies().'}})}[%{Location}]'
+    let rubycmd = 'obj = Net::HTTP.start(%{'.s:domain.'}){|h|h.post(%{'.url.'}, %q{'.method.'paste[parser]='.parser.pdn.'&paste[authorization]=burger&paste[key]=&paste[body]=} + File.read(%q{'.tmp.'}).gsub(/^(.*?) *#\!\! *#{36.chr}/,%{!\!}+92.chr+%{1}).gsub(/[^a-zA-Z0-9_.-]/n) {|s| %{%%%02x} % s[0]},{%{Cookie} => %{'.s:cookies().'}})}; print obj[%{Location}].to_s+%{ }+obj[%{Set-Cookie}].to_s'
     let result = system('ruby -rnet/http -e "'.rubycmd.'"')
+    let redirect = matchstr(result,'^[^ ]*')
+    let cookies  = matchstr(result,'^[^ ]* \zs.*')
+    call s:extractcookiesfromheader(cookies)
     call delete(tmp)
-    if result =~ '^\w\+://'
+    if redirect =~ '^\w\+://'
         set nomodified
         let b:pastie_update = 1
         "silent! let @+ = result
-        silent! let @* = result
-        silent exe "file ".result.s:dl_suffix
+        silent! let @* = redirect
+        silent exe "file ".redirect.s:dl_suffix
         " TODO: make a proper status message
-        echo '"'.result.'" written'
-        silent exe "doautocmd BufWritePost ".result.s:dl_suffix
+        echo '"'.redirect.'" written'
+        silent exe "doautocmd BufWritePost ".redirect.s:dl_suffix
     else
-        if result == 'nil'
-            let result = "Could not post to ".url
+        if redirect == ''
+            let redirect = "Could not post to ".url
         endif
-        let result = substitute(result,'^-e:1:\s*','','')
-        call s:error(result)
+        let redirect = substitute(redirect,'^-e:1:\s*','','')
+        call s:error(redirect)
     endif
 endfunction
 
@@ -420,7 +431,7 @@ endfunction
 
 function! s:cookies()
     if exists("g:pastie_session_id")
-        let cookies = "_session_id=".g:pastie_session_id
+        let cookies = "_pastie_session_id=".g:pastie_session_id
     else
         call s:extractcookies('/')
         if !exists("g:pastie_session_id")
@@ -432,7 +443,7 @@ function! s:cookies()
             endif
             let cookies = ""
         else
-            let cookies = "_session_id=".g:pastie_session_id
+            let cookies = "_pastie_session_id=".g:pastie_session_id
         endif
     endif
     if !exists("g:pastie_account")
@@ -462,13 +473,17 @@ function! s:extractcookies(path)
         let path = '/'.path
     endif
     let cookie = system('ruby -rnet/http -e "print Net::HTTP.get_response(%{'.s:domain.'},%{'.path.'})[%{Set-Cookie}]"')
-    let g:pastie_debug = 1
     if exists("g:pastie_debug")
         let g:pastie_cookies_path = path
         let g:pastie_cookies = cookie
     endif
+    return s:extractcookiesfromheader(cookie)
+endfunction
+
+function! s:extractcookiesfromheader(cookie)
+    let cookie = a:cookie
     if cookie !~ '-e:'
-        let session_id = matchstr(cookie,'\<_session_id=\zs.\{-\}\ze\%([;,]\|$\)')
+        let session_id = matchstr(cookie,'\<_pastie_session_id=\zs.\{-\}\ze\%([;,]\|$\)')
         let account    = matchstr(cookie,'\<account=\zs.\{-\}\ze\%([;,]\|$\)')
         if session_id != ""
             let g:pastie_session_id = session_id
@@ -485,6 +500,11 @@ endfunction
 
 function! s:latestid()
     return system('ruby -rnet/http -e "print Net::HTTP.get_response(URI.parse(%{http://'.s:domain.'/all})).body.match(%r{<a href=.http://'.s:domain.'/(\d+).>View})[1]"')
+endfunction
+
+function! s:urlencode(str)
+    " Vim 6.2, how did we ever live with you?
+    return substitute(substitute(a:str,"[\001-\037%&?=\\\\]",'\="%".printf("%02X",char2nr(submatch(0)))','g'),' ','%20','g')
 endfunction
 
 function! s:newwindow()
